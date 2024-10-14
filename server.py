@@ -1,13 +1,14 @@
 import secrets
-from flask import Flask, request, redirect, session
+from flask import Flask, request, redirect, session, send_from_directory
 from twilio.twiml.voice_response import VoiceResponse, Gather
 from twilio.rest import Client
 from openai import OpenAI
+from pathlib import Path
 
 app = Flask(__name__)
 
 app.secret_key = secrets.flask_secret
-_api_key1 = secrets.vGHheqhAD0uVn28N6A8VkFOL06YvD3rqeHjD1hFl31T3BlbkFJfNRMo20F1kIRXMhCdMdGXA7BwMfe6TLwxHOWQON10A
+_api_key1 = secrets.openai_api_key1
 _api_key2 = secrets.openai_api_key2 
 _secret_account_sid = secrets.secret_account_sid
 _secret_auth_token = secrets.secret_auth_token
@@ -15,12 +16,28 @@ TWILIO_PHONE_NUMBER = "+16506484063";
 dest_number = "+14084775376"
 # Set initial prompt for the conversation context
 INITIAL_PROMPT = "You are doing a role playing, being a person called Shunping, and you want to book a restaurant with 5 people around dinner time, 6:00-8:00pm. Your telephone is 4084775376. You will need wait the next response to answer. And you can conclude the message if you confirm the booking. You should only output the sentence you need to really say."
+server_location = "https://ba38-73-93-166-237.ngrok-free.app"
 
 
 openai_client = OpenAI(api_key=_api_key2)
 
 client = Client(_secret_account_sid, _secret_auth_token)
 
+use_open_ai_voice = True
+
+def openai_speech(message):
+    speech_file_path = Path(__file__).parent / "audios/speech.mp3"
+    response = openai_client.audio.speech.create(
+        model="tts-1",
+        voice="alloy",
+        input=message
+    )
+    response.stream_to_file(speech_file_path)
+
+
+@app.route('/audios/<path:filename>', methods=['GET'])
+def serve_audio(filename):
+    return send_from_directory('audios', filename)
 
 @app.route("/voice", methods=['GET', 'POST'])
 def voice():
@@ -51,7 +68,7 @@ def make_call():
     call = client.calls.create(
         to=dest_number,  # The customer's phone number
         from_=TWILIO_PHONE_NUMBER,  # Your Twilio phone number
-        url= "https://ba38-73-93-166-237.ngrok-free.app/" + "voice"  # TwiML URL for handling the call
+        url= server_location + "/voice"  # TwiML URL for handling the call
     )
 
     return f"Call initiated: {call.sid}"
@@ -107,7 +124,11 @@ def handle_input():
     session['chat_history'] += f"\nAssistant: {agent_response}"
 
     # Repeat the conversation back to the caller
-    response.say(agent_response)
+    if use_open_ai_voice:
+        openai_speech(agent_response)
+        response.play(server_location + "/audios/speech.mp3")
+    else:
+        response.say(agent_response)
 
     # Continue the loop by asking for more input
     response.redirect('/voice')
