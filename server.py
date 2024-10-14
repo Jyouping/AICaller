@@ -16,23 +16,30 @@ _secret_auth_token = secrets.secret_auth_token
 TWILIO_PHONE_NUMBER = "+16506484063";
 dest_number = "+14084775376"
 # Set initial prompt for the conversation context
-INITIAL_PROMPT_en_US = "You are doing a role playing, being a person called Shunping to book a restaurant with 5 people around dinner time, 6:00-8:00pm. Your telephone is 408123456. You will need wait the next response to answer. And you can conclude the message if you confirm the booking but you need to make sure you name is delivered. Also said goodbye to end the conversation if you cannot book it. You should only output the sentence you need to really say."
+INITIAL_PROMPT_en_US = "You are doing a role playing, being a person called Shunping to book a restaurant with 5 people around dinner time, 6:00-8:00pm. It must be tonight. Your telephone is 408123456. You will need wait the next response to answer. And you can conclude the message if you confirm the booking but you need to make sure you name is delivered. Also said goodbye to end the conversation if you cannot book it. You should only output the sentence you need to really say."
 server_location = "https://ba38-73-93-166-237.ngrok-free.app"
-INITIAL_PROMPT_zh_TW = "你正在進行角色扮演，扮演一個叫做邱先生的人要預訂餐廳，你為5個人預訂晚餐，okay的入座時間是6點到8點。你的電話號碼是12345678，講號碼是前面要加「電話是」。你需要等待下一個回應再做回答。確認預定之前要確保姓名告知對方，如果確認預訂，則可以用 goodbye 結束對話。因為沒有位置或其他因素預定失敗的話也需要用 goodbye 結束對話，你應該只輸出你實際需要說的句子，記住你是要預訂的客人不是店員，對話要人性化不要太制式，每次不要超過12個字。"
+INITIAL_PROMPT_zh_TW = "你正在進行角色扮演，扮演一個叫做邱先生的人要預訂餐廳，你為5個人預訂晚餐，okay的入座時間是6點到8點，時間只能是今天晚上，不要問其他天。你的電話號碼是12345678，講號碼是前面要加「電話是」。你需要等待下一個回應再做回答。確認預定之前要確保姓名告知對方，如果確認預訂，則可以用 goodbye 結束對話。因為沒有位置或其他因素預定失敗的話也需要用 goodbye 結束對話，你應該只輸出你實際需要說的句子，記住你是要預訂的客人不是店員，對話要人性化不要太制式，對話不要太長。"
 end_words = ["goodbye", "再見"]
 
 openai_client = OpenAI(api_key=_api_key2)
 
 client = Client(_secret_account_sid, _secret_auth_token)
 
-use_open_ai_transcript = True
-use_open_ai_voice = True
-language = "zh-TW"
+use_open_ai_transcript = False
+use_open_ai_voice = False
+language = "en-US"
 
 if language == "en-US":
     INITIAL_PROMPT = INITIAL_PROMPT_en_US
 else:
     INITIAL_PROMPT = INITIAL_PROMPT_zh_TW
+
+def get_greeing_text(language):
+    if language == "zh-TW":
+        return "哈囉，可以聽得見嗎"
+    else:
+        return "Hello"
+
 
 def openai_speech(message):
     speech_file_path = Path(__file__).parent / "audios/speech.mp3"
@@ -64,16 +71,19 @@ def initial_voice():
 
 
     if use_open_ai_transcript:
-        gather = Gather(input='speech', speechModel='deepgram_nova-2', action='/handle_input', method='POST', speechTimeout='auto', language=language, timeout=5)
+        gather = Gather(input='speech', speechModel='deepgram_nova-2', action='/handle_input', method='POST', speechTimeout='auto', language=language, timeout=3)
 
     else:
-        gather = Gather(input='speech', speechModel='phone_call', action='/handle_input', method='POST', speechTimeout='auto', language=language, timeout=5)
+        gather = Gather(input='speech', speechModel='deepgram_nova-2', action='/handle_input', method='POST', speechTimeout='auto', language=language, timeout=3)
 
         # Use Twilio's Gather to collect speech or input from the caller
         #gather.say("Hi! Hello!")
         # If no input was received, ask the caller again
     response.append(gather)
-    response.redirect('/initial_voice')
+    greeting_text = "hello"
+    openai_speech(get_greeing_text(language))
+    response.play(server_location + "/audios/speech.mp3")
+    response.redirect('/voice')
     return str(response)
 
 
@@ -84,10 +94,10 @@ def voice():
 
 
     if use_open_ai_transcript:
-        gather = Gather(input='speech', speechModel='deepgram_nova-2', action='/handle_input', method='POST', speechTimeout='auto', language=language, timeout=3)
+        gather = Gather(input='speech', speechModel='deepgram_nova-2', action='/handle_input', method='POST', speechTimeout='auto', language=language, timeout=4)
 
     else:
-        gather = Gather(input='speech', speechModel='phone_call', action='/handle_input', method='POST', speechTimeout='auto', language=language, timeout=3)
+        gather = Gather(input='speech', speechModel='deepgram_nova-2', action='/handle_input', method='POST', speechTimeout='auto', language=language, timeout=4)
 
         # Use Twilio's Gather to collect speech or input from the caller
         #gather.say("Hi! Hello!")
