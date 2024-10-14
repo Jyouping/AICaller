@@ -19,20 +19,25 @@ dest_number = "+14084775376"
 INITIAL_PROMPT_en_US = "You are doing a role playing, being a person called Shunping to book a restaurant with 5 people around dinner time, 6:00-8:00pm. It must be tonight. Your telephone is 408123456. You will need wait the next response to answer. And you can conclude the message if you confirm the booking but you need to make sure you name is delivered. Also said goodbye to end the conversation if you cannot book it. You should only output the sentence you need to really say."
 server_location = "https://ba38-73-93-166-237.ngrok-free.app"
 INITIAL_PROMPT_zh_TW = "你正在進行角色扮演，扮演一個叫做邱先生的人要預訂餐廳，你為5個人預訂晚餐，okay的入座時間是6點到8點，時間只能是今天晚上，不要問其他天。你的電話號碼是12345678，講號碼是前面要加「電話是」。你需要等待下一個回應再做回答。確認預定之前要確保姓名告知對方，如果確認預訂，則可以用 goodbye 結束對話。因為沒有位置或其他因素預定失敗的話也需要用 goodbye 結束對話，你應該只輸出你實際需要說的句子，記住你是要預訂的客人不是店員，對話要人性化不要太制式，對話不要太長。"
+HINTS_en_US = "o'clock, restaurant, book, time, date, phone number, name, Shunping, confirmed"
+HINTS_zh_TW = "餐廳, 時間, 電話, 姓名, 預定, 確認"
+
 end_words = ["goodbye", "再見"]
 
 openai_client = OpenAI(api_key=_api_key2)
 
 client = Client(_secret_account_sid, _secret_auth_token)
 
-use_open_ai_transcript = False
-use_open_ai_voice = False
-language = "en-US"
+use_phone_boost = True
+use_open_ai_voice = True
+language = "zh-TW"
 
 if language == "en-US":
     INITIAL_PROMPT = INITIAL_PROMPT_en_US
+    HINTS_PROMPT = HINTS_en_US
 else:
     INITIAL_PROMPT = INITIAL_PROMPT_zh_TW
+    HINTS_PROMPT = HINTS_zh_TW
 
 def get_greeing_text(language):
     if language == "zh-TW":
@@ -57,54 +62,34 @@ def serve_audio(filename):
 
 
 
-@app.route('/recording_status', methods=['POST'])
-def recording_status():
-    # Handle recording status updates if needed
-    print("record_completed")
-    return '', 204
-
-
 @app.route("/initial_voice", methods=['GET', 'POST'])
 def initial_voice():
-    print("voice")
-    response = VoiceResponse()
-
-
-    if use_open_ai_transcript:
-        gather = Gather(input='speech', speechModel='deepgram_nova-2', action='/handle_input', method='POST', speechTimeout='auto', language=language, timeout=3)
-
-    else:
-        gather = Gather(input='speech', speechModel='deepgram_nova-2', action='/handle_input', method='POST', speechTimeout='auto', language=language, timeout=3)
-
-        # Use Twilio's Gather to collect speech or input from the caller
-        #gather.say("Hi! Hello!")
-        # If no input was received, ask the caller again
-    response.append(gather)
-    greeting_text = "hello"
-    openai_speech(get_greeing_text(language))
-    response.play(server_location + "/audios/speech.mp3")
-    response.redirect('/voice')
-    return str(response)
-
+    print("initial_voice")
+    return voice(greeting=True)
 
 @app.route("/voice", methods=['GET', 'POST'])
-def voice():
+def voice(greeting=False):
     print("voice")
     response = VoiceResponse()
 
 
-    if use_open_ai_transcript:
-        gather = Gather(input='speech', speechModel='deepgram_nova-2', action='/handle_input', method='POST', speechTimeout='auto', language=language, timeout=4)
-
+    if use_phone_boost:
+        gather = Gather(input='speech', speechModel='phone_call', action='/handle_input', method='POST', speechTimeout='auto', language=language, timeout=3, hints=HINTS_PROMPT, enhanced=True)
     else:
-        gather = Gather(input='speech', speechModel='deepgram_nova-2', action='/handle_input', method='POST', speechTimeout='auto', language=language, timeout=4)
+        gather = Gather(input='speech', speechModel='deepgram_nova-2', action='/handle_input', method='POST', speechTimeout='auto', language=language, timeout=3, hints=HINTS_PROMPT)
+ 
+    response.append(gather)
 
         # Use Twilio's Gather to collect speech or input from the caller
         #gather.say("Hi! Hello!")
         # If no input was received, ask the caller again
-    response.append(gather)
+    if greeting:
+        greeting_text = "hello"
+        openai_speech(get_greeing_text(language))
+        response.play(server_location + "/audios/speech.mp3")
     response.redirect('/voice')
     return str(response)
+
 
 @app.route("/test", methods=['POST'])
 def test():
@@ -147,12 +132,15 @@ def dry_run():
 
 # Handle input from caller and send to ChatGPT
 @app.route("/handle_input", methods=['POST'])
-def handle_input():
+def handle_input(twilo_transcript=True, message=""):
     print("handle_input")
     response = VoiceResponse()
 
     # Extract the caller's message from Twilio's request
-    caller_message = request.form.get('SpeechResult', '')
+    if twilo_transcript:
+        caller_message = request.form.get('SpeechResult', '')
+    else:
+        caller_message = message
     print("handle_input...", caller_message)
 
     # If the caller says "goodbye," end the call
@@ -192,7 +180,7 @@ def handle_input():
     return str(response)
 
 def get_chatgpt_response(caller_message):
-    response = openai_client.chat.completions.create(model="gpt-4o",  # Or other models like "gpt-3.5-turbo"
+    response = openai_client.chat.completions.create(model="gpt-4o-mini",  # Or other models like "gpt-3.5-turbo"
     messages=[
 #        {"role": "system", "content": "You are being a customer, try to book the restaurant, and the user is restaurant, so you need to answer that as a customer"},  # System message to set behavior
         {"role": "user", "content": caller_message},  # User message to pass the input
