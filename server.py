@@ -1,24 +1,23 @@
-import secrets
+import secrets_key
 from flask import Flask, request, redirect, session, send_from_directory
 from twilio.twiml.voice_response import VoiceResponse, Gather
 from twilio.rest import Client
 from openai import OpenAI
 from pathlib import Path
+from prompts import Prompt
 import requests
 
 app = Flask(__name__)
 
-app.secret_key = secrets.flask_secret
-_api_key1 = secrets.openai_api_key1
-_api_key2 = secrets.openai_api_key2 
-_secret_account_sid = secrets.secret_account_sid
-_secret_auth_token = secrets.secret_auth_token
+app.secret_key = secrets_key.flask_secret
+_api_key1 = secrets_key.openai_api_key1
+_api_key2 = secrets_key.openai_api_key2 
+_secret_account_sid = secrets_key.secret_account_sid
+_secret_auth_token = secrets_key.secret_auth_token
 TWILIO_PHONE_NUMBER = "+16506484063";
 dest_number = "+14084775376"
 # Set initial prompt for the conversation context
-INITIAL_PROMPT_en_US = "You are doing a role playing, being a person called Shunping to book a restaurant with 5 people around dinner time, 6:00-8:00pm. It must be tonight. Your telephone is 408123456. You will need wait the next response to answer. And you can conclude the message if you confirm the booking but you need to make sure you name is delivered. Also said goodbye to end the conversation if you cannot book it. You should only output the sentence you need to really say."
-server_location = "https://ba38-73-93-166-237.ngrok-free.app"
-INITIAL_PROMPT_zh_TW = "你正在進行角色扮演，扮演一個叫做邱先生的人要預訂餐廳，你為5個人預訂晚餐，okay的入座時間是6點到8點，時間只能是今天晚上，不要問其他天。你的電話號碼是12345678，講號碼是前面要加「電話是」。你需要等待下一個回應再做回答。確認預定之前要確保姓名告知對方，如果確認預訂，則可以用 goodbye 結束對話。因為沒有位置或其他因素預定失敗的話也需要用 goodbye 結束對話，你應該只輸出你實際需要說的句子，記住你是要預訂的客人不是店員，對話要人性化不要太制式，對話不要太長。"
+server_location = "ba38-73-93-166-237.ngrok-free.app"
 HINTS_en_US = "o'clock, restaurant, book, time, date, phone number, name, Shunping, confirmed"
 HINTS_zh_TW = "餐廳, 時間, 電話, 姓名, 預定, 確認"
 
@@ -30,13 +29,12 @@ client = Client(_secret_account_sid, _secret_auth_token)
 
 use_phone_boost = True
 use_open_ai_voice = True
+use_streaming = False
 language = "zh-TW"
 
 if language == "en-US":
-    INITIAL_PROMPT = INITIAL_PROMPT_en_US
     HINTS_PROMPT = HINTS_en_US
 else:
-    INITIAL_PROMPT = INITIAL_PROMPT_zh_TW
     HINTS_PROMPT = HINTS_zh_TW
 
 def get_greeing_text(language):
@@ -61,7 +59,6 @@ def serve_audio(filename):
     return send_from_directory('audios', filename)
 
 
-
 @app.route("/initial_voice", methods=['GET', 'POST'])
 def initial_voice():
     print("initial_voice")
@@ -71,7 +68,10 @@ def initial_voice():
 def voice(greeting=False):
     print("voice")
     response = VoiceResponse()
-
+    if use_streaming:   #Not supported
+        print(f'wss://{server_location}/media_stream')
+        response.connect().stream(url=f'wss://{server_location}/socket')
+        return str(response)
 
     if use_phone_boost:
         gather = Gather(input='speech', speechModel='phone_call', action='/handle_input', method='POST', speechTimeout='auto', language=language, timeout=3, hints=HINTS_PROMPT, enhanced=True)
@@ -86,7 +86,7 @@ def voice(greeting=False):
     if greeting:
         greeting_text = "hello"
         openai_speech(get_greeing_text(language))
-        response.play(server_location + "/audios/speech.mp3")
+        response.play(f"https://{server_location}/audios/speech.mp3")
     response.redirect('/voice')
     return str(response)
 
@@ -105,7 +105,7 @@ def make_call():
     call = client.calls.create(
         to=dest_number,  # The customer's phone number
         from_=TWILIO_PHONE_NUMBER,  # Your Twilio phone number
-        url= server_location + "/initial_voice"  # TwiML URL for handling the call
+        url= f"https://{server_location}/initial_voice"  # TwiML URL for handling the call
     )
 
     return f"Call initiated: {call.sid}"
@@ -116,7 +116,8 @@ def dry_run():
     caller_message = request.form.get('msg')
     print("handle_input...", caller_message)
     if 'chat_history' not in session:
-        session['chat_history'] = INITIAL_PROMPT  # Start with the initial prompt
+        prompt = Prompt(lang=language, name='王大明')
+        session['chat_history'] = prompt.get_prompt() # Start with the initial prompt
 
     # Append the caller's message to the chat history
     session['chat_history'] += f"\nCaller: {caller_message}"
@@ -150,7 +151,9 @@ def handle_input(twilo_transcript=True, message=""):
 
     # Retrieve or initialize conversation history from the session
     if 'chat_history' not in session:
-        session['chat_history'] = INITIAL_PROMPT  # Start with the initial prompt
+        prompt = Prompt(lang=language, name='王大明')
+        session['chat_history'] = prompt.get_prompt() # Start with the initial prompt
+
 
     # Append the caller's message to the chat history
     session['chat_history'] += f"\nCaller: {caller_message}"
@@ -165,7 +168,7 @@ def handle_input(twilo_transcript=True, message=""):
     # Repeat the conversation back to the caller
     if use_open_ai_voice:
         openai_speech(agent_response)
-        response.play(server_location + "/audios/speech.mp3")
+        response.play(f"https://{server_location}/audios/speech.mp3")
     else:
         response.say(agent_response)
 
@@ -180,9 +183,9 @@ def handle_input(twilo_transcript=True, message=""):
     return str(response)
 
 def get_chatgpt_response(caller_message):
-    response = openai_client.chat.completions.create(model="gpt-4o-mini",  # Or other models like "gpt-3.5-turbo"
+    response = openai_client.chat.completions.create(model="gpt-4o",  # Or other models like "gpt-3.5-turbo"
     messages=[
-#        {"role": "system", "content": "You are being a customer, try to book the restaurant, and the user is restaurant, so you need to answer that as a customer"},  # System message to set behavior
+        {"role": "system", "content": "The assistent is trying to make a reservation for himself, don't let people discover you are not human. Only output the conversation response, dont output the role at beginning"},  # System message to set behavior
         {"role": "user", "content": caller_message},  # User message to pass the input
     ])
     print("[DEBUG]",caller_message)
@@ -203,5 +206,6 @@ def answer_call():
     return str(resp)
 
 if __name__ == "__main__":
+    #socketio.run(app, host='0.0.0.0', port=6000, debug=True)
     app.run(host='0.0.0.0', port=6000)
 

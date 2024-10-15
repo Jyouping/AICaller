@@ -1,2 +1,3 @@
-secrets.py
-./audios/*
+secrets_key.py
+audios/*.*
+.DS*
