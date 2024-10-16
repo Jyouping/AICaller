@@ -29,7 +29,7 @@ stream_server_location = "0.tcp.us-cal-1.ngrok.io:16691"
 HINTS_en_US = "o'clock, restaurant, book, time, date, phone number, name, Shunping, confirmed"
 HINTS_zh_TW = "餐廳, 時間, 電話, 姓名, 預定, 確認"
 
-end_words = ["good bye", "再見", "goodbye"]
+end_words = ["good bye", "再見", "goodbye", "再见"]
 
 openai_client = OpenAI(api_key=_api_key2)
 
@@ -37,8 +37,10 @@ client = Client(_secret_account_sid, _secret_auth_token)
 
 use_phone_boost = True
 use_open_ai_voice = True
-use_streaming = True
+use_streaming = False
 language = "zh-TW"
+
+call_sid = None
 
 
 if language == "en-US":
@@ -117,7 +119,7 @@ def make_call():
         from_=TWILIO_PHONE_NUMBER,  # Your Twilio phone number
         url= f"https://{server_location}/initial_voice"  # TwiML URL for handling the call
     )
-
+    call_sid = call.sid
     return f"Call initiated: {call.sid}"
 
 @app.route("/dry_run", methods=['POST'])
@@ -206,13 +208,14 @@ def get_chatgpt_response(caller_message):
 def media_stream(ws):
     app.logger.info("Connection accepted")
     prompt = Prompt(lang=language, name='王大明')
-    openAIstream = StreamingAPI(prompt.get_prompt(), end_words)
+    openAIstream = StreamingAPI(prompt.get_prompt(), end_words, client, call_sid)
     openai_ws = None
     while not ws.closed:
         message = ws.receive()
         if message:
             try:
                 data = json.loads(message)
+                print (data)
                 if data.get('event') == 'media':
                     # test code to reproduce the message
                     '''audio_delta = {
@@ -242,6 +245,8 @@ def media_stream(ws):
     if openai_ws.sock and openai_ws.sock.connected:
         openai_ws.close()
 
+    response = VoiceResponse() 
+    return response.hangup()
 
 
 @app.route("/answer", methods=['GET', 'POST'])

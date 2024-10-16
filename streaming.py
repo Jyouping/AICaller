@@ -12,11 +12,14 @@ LOG_EVENT_TYPES = []
 VOICE = "alloy"
 
 class StreamingAPI:
-	def __init__(self, prompt, end_words):
+	def __init__(self, prompt, end_words, twilio_client, call_sid):
 		self.openai_ws = None 
 		self.prompt = prompt
 		self.end_words = end_words
 		self.end_call = False
+		self.thread = None
+		self.twilio_client = twilio_client	# TODO: change into callback
+		self.call_sid = call_sid
 
 	def openai_ws_connect(self, connection, stream_sid):	#connection is to connect flask socket
 	    """Connect to the OpenAI WebSocket API."""
@@ -54,9 +57,9 @@ class StreamingAPI:
 	            if response.get('type') == 'response.audio_transcript.done':
 	            	print(response['transcript'])
 	            	msg = response['transcript']
-	            	for end_word in end_words:
+	            	for end_word in self.end_words:
 	            		if end_word in msg:
-	            			end_call = True
+	            			self.end_call = True
 
 
 	            if response.get('type') == 'response.audio.delta' and 'delta' in response:
@@ -67,11 +70,12 @@ class StreamingAPI:
 	                }
 	                print(f"sending audio...delta sid {stream_sid}")
 	                connection.send(json.dumps(audio_delta))
-	                if end_call:
+	                if self.end_call:
 	                	print(f"ending call...clean up")
-	                	self.openai_ws.close()
 	                	connection.close()
-	                	thread.join()
+	                	self.twilio_client.calls(self.call_sid).update(status='completed')
+	                	self.thread.join()
+
 	        except Exception as e:
 	            print(f"Error processing OpenAI message: {e}, Raw message: {message}")
 
@@ -98,6 +102,6 @@ class StreamingAPI:
 	        self.openai_ws.run_forever()
 
 	    # Start the OpenAI WebSocket in a separate thread
-	    threading.Thread(target=run_openai_ws).start()
+	    self.thread = threading.Thread(target=run_openai_ws).start()
 
 	    return self.openai_ws
