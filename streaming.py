@@ -1,10 +1,11 @@
 import json
 import asyncio
 import websockets
+import secrets_key
 from flask import Flask, request
 from flask_socketio import SocketIO, emit
 
-OPENAI_API_KEY = _api_key2
+OPENAI_API_KEY = secrets_key.openai_api_key2 
 
 class StreamingAPI:
 

@@ -3,7 +3,7 @@ datetime.today().strftime('%Y-%m-%d')
 
 class Prompt:
 
-	def __init__(self, lang, name, phone='123456789', time_start='11:00am', time_end='14:00pm', date='10/14/2024', number_of_people=3):
+	def __init__(self, lang, name, phone='123456789', time_start='11:00am', time_end='14:00pm', date='10/16/2024', number_of_people=3):
 		self.lang = lang
 		today = datetime.today().strftime('%m/%d/%Y')
 		self.PROMPT_en_US = f'''Today is {today}. You are doing a role playing, being a person called {name} to book a restaurant with {number_of_people} people around {time_start}-{time_end}. 
@@ -19,8 +19,8 @@ class Prompt:
 
 	def get_prompt(self):
 		print (f'Prompt{self.PROMPT_zh_TW}')	
-		if self.lang == 'en_US':
+		if self.lang == 'en-US':
 			return self.PROMPT_en_US
-		elif self.lang == 'zh_TW':
+		elif self.lang == 'zh-TW':
 			return self.PROMPT_zh_TW
 		return self.PROMPT_zh_TW
