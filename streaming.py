@@ -1,66 +1,103 @@
 import json
 import asyncio
-import websockets
+import websocket
 import secrets_key
-from flask import Flask, request
-from flask_socketio import SocketIO, emit
+import threading
+import time
 
 OPENAI_API_KEY = secrets_key.openai_api_key2 
 
-class StreamingAPI:
+#LOG_EVENT_TYPES = ["session.updated", "response.audio.delta"]
+LOG_EVENT_TYPES = []
+VOICE = "alloy"
 
-	def handle_media_stream(message):
-	    stream_sid = None  # For tracking stream session ID
-	    
-	    async def openai_websocket():
-	        # Connect to OpenAI Realtime API
-	        openai_ws_url = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01"
-	        headers = {
+class StreamingAPI:
+	def __init__(self, prompt, end_words):
+		self.openai_ws = None 
+		self.prompt = prompt
+		self.end_words = end_words
+		self.end_call = False
+
+	def openai_ws_connect(self, connection, stream_sid):	#connection is to connect flask socket
+	    """Connect to the OpenAI WebSocket API."""
+
+	    def send_session_update(ws):
+	        session_update = {
+	            'type': 'session.update',
+	            'session': {
+	                'turn_detection': {'type': 'server_vad'},
+	                'input_audio_format': 'g711_ulaw',
+	                'output_audio_format': 'g711_ulaw',
+	                'voice': VOICE,
+	                'instructions': self.prompt,
+	                'modalities': ["text", "audio"],
+	                'temperature': 0.8
+	            }
+	        }
+	        print('Sending session update:', json.dumps(session_update))
+	        ws.send(json.dumps(session_update))
+
+	    def on_open(ws):
+	        print("Connected to the OpenAI Realtime API")
+	        time.sleep(0.25)  # Ensure connection stability
+	        send_session_update(ws)
+
+	    def on_message(ws, message):
+	        try:
+	            response = json.loads(message)
+	            if response.get('type') in LOG_EVENT_TYPES:
+	                print(f"Received event: {response['type']}", response)
+
+	            if response.get('type') == 'session.updated':
+	                print('Session updated successfully:', response)
+
+	            if response.get('type') == 'response.audio_transcript.done':
+	            	print(response['transcript'])
+	            	msg = response['transcript']
+	            	for end_word in end_words:
+	            		if end_word in msg:
+	            			end_call = True
+
+
+	            if response.get('type') == 'response.audio.delta' and 'delta' in response:
+	                audio_delta = {
+	                    'event': 'media',
+	                    'streamSid': stream_sid,
+	                    'media': {'payload': response['delta']}
+	                }
+	                print(f"sending audio...delta sid {stream_sid}")
+	                connection.send(json.dumps(audio_delta))
+	                if end_call:
+	                	print(f"ending call...clean up")
+	                	self.openai_ws.close()
+	                	connection.close()
+	                	thread.join()
+	        except Exception as e:
+	            print(f"Error processing OpenAI message: {e}, Raw message: {message}")
+
+	    def on_close(ws):
+	        print("Disconnected from the OpenAI Realtime API")
+
+	    def on_error(ws, error):
+	        print(f"Error in OpenAI WebSocket: {error}")
+
+	    # Open WebSocket connection to OpenAI API
+	    self.openai_ws = websocket.WebSocketApp(
+	        'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01',
+	        header={
 	            'Authorization': f'Bearer {OPENAI_API_KEY}',
 	            'OpenAI-Beta': 'realtime=v1'
-	        }
-	        
-	        async with websockets.connect(openai_ws_url, extra_headers=headers) as openai_ws:
-	            print('Connected to the OpenAI Realtime API')
+	        },
+	        on_open=on_open,
+	        on_message=on_message,
+	        on_close=on_close,
+	        on_error=on_error
+	    )
 
-	            # Send session update to OpenAI WebSocket
-	            session_update = {
-	                'type': 'session.update',
-	                'session': {
-	                    'turn_detection': {'type': 'server_vad'},
-	                    'input_audio_format': 'g711_ulaw',
-	                    'output_audio_format': 'g711_ulaw',
-	                    'voice': VOICE,
-	                    'instructions': SYSTEM_MESSAGE,
-	                    'modalities': ['text', 'audio'],
-	                    'temperature': 0.8,
-	                }
-	            }
-	            await asyncio.sleep(0.25)  # Ensure connection stability
-	            await openai_ws.send(json.dumps(session_update))
-	            print('Session update sent')
+	    def run_openai_ws():
+	        self.openai_ws.run_forever()
 
-	            # OpenAI WebSocket message handler
-	            async for openai_message in openai_ws:
-	                try:
-	                    response = json.loads(openai_message)
-	                    if response['type'] in LOG_EVENT_TYPES:
-	                        print(f"Received event: {response['type']}", response)
-	                    if response['type'] == 'response.audio.delta' and 'delta' in response:
-	                        audio_delta = {
-	                            'event': 'media',
-	                            'streamSid': stream_sid,
-	                            'media': {'payload': response['delta']}
-	                        }
-	                        emit('media', audio_delta)  # Send audio delta back to the client
-	                except Exception as e:
-	                    print(f"Error processing OpenAI message: {e}, Raw message: {openai_message}")
+	    # Start the OpenAI WebSocket in a separate thread
+	    threading.Thread(target=run_openai_ws).start()
 
-	    # Handle media stream event from the client (e.g., from Twilio)
-	    if message['event'] == 'media':
-	        asyncio.run(openai_websocket())  # Handle WebSocket in an async manner
-	    elif message['event'] == 'start':
-	        stream_sid = message['start']['streamSid']
-	        print('Incoming stream has started', stream_sid)
-	    else:
-	        print('Received non-media event:', message['event'])
+	    return self.openai_ws

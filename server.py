@@ -6,8 +6,15 @@ from openai import OpenAI
 from pathlib import Path
 from prompts import Prompt
 import requests
+from flask_sockets import Sockets, Rule
+import base64
+import json
+import logging
+from streaming import StreamingAPI
 
 app = Flask(__name__)
+sockets = Sockets(app)
+
 
 app.secret_key = secrets_key.flask_secret
 _api_key1 = secrets_key.openai_api_key1
@@ -17,11 +24,12 @@ _secret_auth_token = secrets_key.secret_auth_token
 TWILIO_PHONE_NUMBER = "+16506484063";
 dest_number = "+14084775376"
 # Set initial prompt for the conversation context
-server_location = "ba38-73-93-166-237.ngrok-free.app"
+server_location = "7229-73-93-166-237.ngrok-free.app"
+stream_server_location = "0.tcp.us-cal-1.ngrok.io:16691"
 HINTS_en_US = "o'clock, restaurant, book, time, date, phone number, name, Shunping, confirmed"
 HINTS_zh_TW = "餐廳, 時間, 電話, 姓名, 預定, 確認"
 
-end_words = ["goodbye", "再見"]
+end_words = ["good bye", "再見", "goodbye"]
 
 openai_client = OpenAI(api_key=_api_key2)
 
@@ -29,8 +37,9 @@ client = Client(_secret_account_sid, _secret_auth_token)
 
 use_phone_boost = True
 use_open_ai_voice = True
-use_streaming = False
+use_streaming = True
 language = "zh-TW"
+
 
 if language == "en-US":
     HINTS_PROMPT = HINTS_en_US
@@ -70,7 +79,8 @@ def voice(greeting=False):
     response = VoiceResponse()
     if use_streaming:   #Not supported
         print(f'wss://{server_location}/media_stream')
-        response.connect().stream(url=f'wss://{server_location}/socket')
+        response.connect().stream(url=f'wss://{server_location}/media_stream')
+        response.pause(20)
         return str(response)
 
     if use_phone_boost:
@@ -192,6 +202,47 @@ def get_chatgpt_response(caller_message):
     print("[DEBUG]",response)
     return response
 
+@sockets.route('/media_stream', websocket=True)
+def media_stream(ws):
+    app.logger.info("Connection accepted")
+    prompt = Prompt(lang=language, name='王大明')
+    openAIstream = StreamingAPI(prompt.get_prompt(), end_words)
+    openai_ws = None
+    while not ws.closed:
+        message = ws.receive()
+        if message:
+            try:
+                data = json.loads(message)
+                if data.get('event') == 'media':
+                    # test code to reproduce the message
+                    '''audio_delta = {
+                        'event': 'media',
+                        'streamSid': stream_sid,
+                        'media': {'payload': data['media']['payload']}
+                    }
+                    print(f"sending audio...delta sid {stream_sid}")
+                    ws.send(json.dumps(audio_delta))'''
+
+                    if openai_ws.sock and openai_ws.sock.connected:
+                        audio_append = {
+                            'type': 'input_audio_buffer.append',
+                            'audio': data['media']['payload']
+                        }
+                        openai_ws.send(json.dumps(audio_append))
+                elif data.get('event') == 'start':
+                    stream_sid = data['start']['streamSid']
+                    print(f"Incoming stream has started: {stream_sid}")
+                    openai_ws = openAIstream.openai_ws_connect(ws, stream_sid)
+                else:
+                    print(f"Received non-media event: {data.get('event')}")
+            except Exception as e:
+                print(f"Error parsing message: {e}, Message: {message}")
+
+    # Close OpenAI WebSocket when client disconnects
+    if openai_ws.sock and openai_ws.sock.connected:
+        openai_ws.close()
+
+
 
 @app.route("/answer", methods=['GET', 'POST'])
 def answer_call():
@@ -205,7 +256,20 @@ def answer_call():
 
     return str(resp)
 
+
+# evil hack to fix socket bug
+sockets.url_map.add(Rule('/media_stream', endpoint=media_stream, websocket=True))
+
+
 if __name__ == "__main__":
+    app.logger.setLevel(logging.DEBUG)
     #socketio.run(app, host='0.0.0.0', port=6000, debug=True)
-    app.run(host='0.0.0.0', port=6000)
+    #app.run(host='0.0.0.0', port=6000)
+    from gevent import pywsgi
+    from geventwebsocket.handler import WebSocketHandler
+
+    server = pywsgi.WSGIServer(('0.0.0.0', 6000), app, handler_class=WebSocketHandler)
+    #server = pywsgi.WSGIServer(('0.0.0.0', 6000), app)
+    print("Server listening on: http://localhost:" + str(6000))
+    server.serve_forever()
 
