@@ -12,22 +12,24 @@ LOG_EVENT_TYPES = []
 VOICE = "alloy"
 
 class StreamingAPI:
-	def __init__(self, prompt, end_words, twilio_client, call_sid):
+	def __init__(self, prompt, end_words, twilio_client):
 		self.openai_ws = None 
 		self.prompt = prompt
 		self.end_words = end_words
 		self.end_call = False
 		self.thread = None
 		self.twilio_client = twilio_client	# TODO: change into callback
-		self.call_sid = call_sid
 
-	def openai_ws_connect(self, connection, stream_sid):	#connection is to connect flask socket
+	def openai_ws_connect(self, connection, stream_sid, call_sid):	#connection is to connect flask socket
 	    """Connect to the OpenAI WebSocket API."""
 
 	    def send_session_update(ws):
 	        session_update = {
 	            'type': 'session.update',
 	            'session': {
+                    'input_audio_transcription': {
+                        "model": "whisper-1"
+                    },
 	                'turn_detection': {'type': 'server_vad'},
 	                'input_audio_format': 'g711_ulaw',
 	                'output_audio_format': 'g711_ulaw',
@@ -54,6 +56,9 @@ class StreamingAPI:
 	            if response.get('type') == 'session.updated':
 	                print('Session updated successfully:', response)
 
+	            if response.get('type') == 'conversation.item.input_audio_transcription.completed':
+	            	print('input message:', response)
+
 	            if response.get('type') == 'response.audio_transcript.done':
 	            	print(response['transcript'])
 	            	msg = response['transcript']
@@ -68,18 +73,17 @@ class StreamingAPI:
 	                    'streamSid': stream_sid,
 	                    'media': {'payload': response['delta']}
 	                }
-	                print(f"sending audio...delta sid {stream_sid}")
 	                connection.send(json.dumps(audio_delta))
 	                if self.end_call:
 	                	print(f"ending call...clean up")
 	                	connection.close()
-	                	self.twilio_client.calls(self.call_sid).update(status='completed')
-	                	self.thread.join()
+	                	self.twilio_client.calls(call_sid).update(status='completed')
+	                	#self.thread.join()
 
 	        except Exception as e:
 	            print(f"Error processing OpenAI message: {e}, Raw message: {message}")
 
-	    def on_close(ws):
+	    def on_close(ws, r1, r2):
 	        print("Disconnected from the OpenAI Realtime API")
 
 	    def on_error(ws, error):

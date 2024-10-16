@@ -11,6 +11,7 @@ import base64
 import json
 import logging
 from streaming import StreamingAPI
+from voice_mapping import VoiceConfig
 
 app = Flask(__name__)
 sockets = Sockets(app)
@@ -38,10 +39,9 @@ client = Client(_secret_account_sid, _secret_auth_token)
 use_phone_boost = True
 use_open_ai_voice = True
 use_streaming = False
-language = "zh-TW"
+language = "en-US"
 
-call_sid = None
-
+voice_mapping = VoiceConfig(language)
 
 if language == "en-US":
     HINTS_PROMPT = HINTS_en_US
@@ -59,7 +59,7 @@ def openai_speech(message):
     speech_file_path = Path(__file__).parent / "audios/speech.mp3"
     response = openai_client.audio.speech.create(
         model="tts-1",
-        voice="alloy",
+        voice=voice_mapping.get_open_ai_voice(),
         input=message
     )
     response.stream_to_file(speech_file_path)
@@ -119,7 +119,6 @@ def make_call():
         from_=TWILIO_PHONE_NUMBER,  # Your Twilio phone number
         url= f"https://{server_location}/initial_voice"  # TwiML URL for handling the call
     )
-    call_sid = call.sid
     return f"Call initiated: {call.sid}"
 
 @app.route("/dry_run", methods=['POST'])
@@ -155,6 +154,7 @@ def handle_input(twilo_transcript=True, message=""):
     else:
         caller_message = message
     print("handle_input...", caller_message)
+    # TODO confidence handling
 
     # If the caller says "goodbye," end the call
     if "goodbye" in caller_message.lower():
@@ -181,8 +181,8 @@ def handle_input(twilo_transcript=True, message=""):
     if use_open_ai_voice:
         openai_speech(agent_response)
         response.play(f"https://{server_location}/audios/speech.mp3")
-    else:
-        response.say(agent_response)
+    else:   #TODO voice mapping according to language
+        response.say(agent_response, voice=voice_mapping.get_twilio_voice(), language=language)
 
     # Continue the loop by asking for more input
     for end_word in end_words:
@@ -206,16 +206,16 @@ def get_chatgpt_response(caller_message):
 
 @sockets.route('/media_stream', websocket=True)
 def media_stream(ws):
-    app.logger.info("Connection accepted")
+    app.logger.info(f"Connection accepted")
     prompt = Prompt(lang=language, name='王大明')
-    openAIstream = StreamingAPI(prompt.get_prompt(), end_words, client, call_sid)
+
+    openAIstream = StreamingAPI(prompt.get_prompt(), end_words, client)
     openai_ws = None
     while not ws.closed:
         message = ws.receive()
         if message:
             try:
                 data = json.loads(message)
-                print (data)
                 if data.get('event') == 'media':
                     # test code to reproduce the message
                     '''audio_delta = {
@@ -234,8 +234,9 @@ def media_stream(ws):
                         openai_ws.send(json.dumps(audio_append))
                 elif data.get('event') == 'start':
                     stream_sid = data['start']['streamSid']
+                    callSid = data['start']['callSid']
                     print(f"Incoming stream has started: {stream_sid}")
-                    openai_ws = openAIstream.openai_ws_connect(ws, stream_sid)
+                    openai_ws = openAIstream.openai_ws_connect(ws, stream_sid, callSid)
                 else:
                     print(f"Received non-media event: {data.get('event')}")
             except Exception as e:
