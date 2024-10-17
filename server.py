@@ -39,7 +39,7 @@ client = Client(_secret_account_sid, _secret_auth_token)
 use_phone_boost = True
 use_open_ai_voice = True
 use_streaming = False
-language = "en-US"
+language = "zh-TW"
 
 voice_mapping = VoiceConfig(language)
 

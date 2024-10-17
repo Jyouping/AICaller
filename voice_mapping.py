@@ -6,7 +6,7 @@ class VoiceConfig:
 		return 'alloy'
 
 	def get_twilio_voice(self):
-		if lang == 'zh-TW':
+		if self.lang == 'zh-TW':
 			return 'Google.cmn-TW-Wavenet-B'
 		else:
 			return 	'en-US-Standard-H'
